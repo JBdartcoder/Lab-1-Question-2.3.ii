@@ -1,0 +1,121 @@
+from scipy.integrate import solve_ivp
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+class Car:
+
+    # Declare car parameters from question
+    def __init__(self,
+                 length=2.3,
+                 velocity=5,
+                 x_position=0.,
+                 y_position=0.3,
+                 pose=np.deg2rad(5)):   # pose of 5 deg. -> rads.
+        self.__length = length
+        self. __velocity = velocity
+        self.__x_position = x_position
+        self.__y_position = y_position
+        self.__pose_initial = pose
+
+    # State parameters needed for move function of the car
+    def move(self, steering_angle, offset, dt):
+
+        # STEP 1: define the system dynamics
+        def system_dynamics(_t,z):  # Defines the system dynamics given in eqns. 3.11a-c
+
+            theta = z[2]    # theta is 3rd part of f(x,y,theta), therefore use part 2 from array (starts at 0)
+            return [self.__velocity * np.cos(theta),
+                    self.__velocity * np.sin(theta),
+                    self.__velocity * np.tan(steering_angle + offset) / self.__length]  # offset added to eqn.
+
+        # STEP 2: define the initial condition z(0)
+        z_initial = [self.__x_position,
+                     self.__y_position,
+                     self.__pose_initial]
+
+        # STEP 3: Call solve_ivp to solve IDE system
+        __num_points = 1000     # resolution
+        solution = solve_ivp(system_dynamics,
+                             [0, dt],
+                             z_initial,
+                             t_eval=np.linspace(0, dt, __num_points))
+
+        self.__x_position = solution.y[0][-1]       # [-1] represents last element in the array
+        self.__y_position = solution.y[1][-1]
+        self.__pose_initial = solution.y[2][-1]
+
+    # Allow a way to access solutions
+    def x(self):
+        return self.__x_position
+
+    def y(self):
+        return self.__y_position
+
+    def theta(self):
+        return self.__pose_initial
+
+
+class PidController:
+
+    # State parameters needed for PID controller to operate
+    def __init__(self, kp, kd, ki, ts):
+        self.__kp = kp
+        self.__kd = kd / ts
+        self.__ki = ki * ts
+        self.__ts = ts
+        self.__previous_error = None
+        self.__sum_errors = 0.0
+
+    def control(self, y, set_point=0):  # y is distance from middle of lane (above = +ve)
+        error = set_point - y           # calculate error
+        u = self.__kp * error
+
+        # If there was a previous error, implement D function of PD controller
+        if self.__previous_error is not None:
+            u += self.__kd * (error - self.__previous_error)    # += means add onto previous value of u
+
+        # Perform 'I' function of PID controller
+        u += self.__ki * self.__sum_errors
+        
+        self.__previous_error = error   # Save previous error for use again
+        self.__sum_errors += error      # Add current error onto the error sum
+
+        return u
+
+
+# Create a new car
+percy = Car(y_position=0.5)
+
+# Declare appropriate variables
+__samp_rate = 40                    # From question ~ sampling rate  = 40Hz
+t_sampling = 1 / __samp_rate        # Calculate interval between samples
+time_max = 50                       # From question ~ sample for 50s
+__t_range = __samp_rate * time_max  # Calculate total sample points range
+
+# Create a new P controller
+pid1 = PidController(0.9, 0.5, 0.05, t_sampling)
+
+# Create array to store different values
+y_cache = np.array([percy.y()])
+x_cache = np.array([percy.x()])
+
+# Use PD controller to determine steering angle
+for t in range(__t_range):
+    steering_angle = pid1.control(percy.y())
+
+    # Call the Car.move function
+    # Use determined steering angle, offset of 1deg., & sampling interval dt
+    percy.move(steering_angle, np.deg2rad(1), t_sampling)
+
+    # 'Stack' occurring values in x/y cache array
+    y_cache = np.vstack((y_cache, [percy.y()]))
+    x_cache = np.vstack((x_cache, [percy.x()]))
+
+# Plot x cache vs y cache of different K_d values for x-y trajectory
+plt.plot(x_cache, y_cache)
+
+plt.grid()
+plt.xlabel('x (m)')
+plt.ylabel('y (m)')
+plt.show()
